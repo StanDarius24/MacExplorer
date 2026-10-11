@@ -30,10 +30,27 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
 log "Looking up latest release for ${REPO}..."
-API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 RELEASE_JSON="${WORK_DIR}/release.json"
-curl -fsSL "${API_URL}" -o "${RELEASE_JSON}" \
-  || die "Failed to query GitHub releases API for ${REPO}. Check your network connection and that a release exists."
+
+# Prefer the dedicated "latest release" endpoint (only returns non-draft,
+# non-prerelease releases). If that 404s — e.g. because every release so
+# far was created by a manual workflow run and happened to be flagged as a
+# prerelease — fall back to the full releases list. The list is sorted
+# newest-first, and since the asset-URL extraction below just takes the
+# first match in the raw JSON text, feeding it the full array still
+# correctly resolves to the newest release's assets without needing to
+# parse out a single object.
+LATEST_URL="https://api.github.com/repos/${REPO}/releases/latest"
+HTTP_STATUS=$(curl -sSL -o "${RELEASE_JSON}" -w '%{http_code}' "${LATEST_URL}")
+
+if [[ "${HTTP_STATUS}" != "200" ]]; then
+  log "No non-prerelease release found (HTTP ${HTTP_STATUS}); checking full release list..."
+  ALL_RELEASES_URL="https://api.github.com/repos/${REPO}/releases"
+  HTTP_STATUS=$(curl -sSL -o "${RELEASE_JSON}" -w '%{http_code}' "${ALL_RELEASES_URL}")
+  if [[ "${HTTP_STATUS}" != "200" ]]; then
+    die "Failed to query GitHub releases API for ${REPO} (HTTP ${HTTP_STATUS}). Check your network connection and that a release exists."
+  fi
+fi
 
 ZIP_URL=$(grep -o '"browser_download_url": *"[^"]*\.zip"' "${RELEASE_JSON}" | sed -E 's/.*"(https[^"]+)"/\1/' | head -n 1)
 SHA_URL=$(grep -o '"browser_download_url": *"[^"]*\.zip\.sha256"' "${RELEASE_JSON}" | sed -E 's/.*"(https[^"]+)"/\1/' | head -n 1)

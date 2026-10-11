@@ -103,7 +103,13 @@ jobs:
           name: MacExplorer ${{ steps.version.outputs.version }}
           generate_release_notes: true
           draft: false
-          prerelease: ${{ github.ref_type != 'tag' }}
+          # Always publish as a full (non-prerelease) release. GitHub's
+          # "latest release" API — which scripts/install.sh relies on —
+          # ignores prereleases entirely, so marking manual/dispatch runs
+          # as prereleases would make install.sh 404 on an otherwise-valid
+          # release. If you want real prereleases in the future, give
+          # install.sh its own opt-in flag instead of changing this.
+          prerelease: false
           files: |
             ${{ steps.package.outputs.zip_path }}
             ${{ steps.package.outputs.checksum_path }}
