@@ -28,20 +28,49 @@ struct MainWindowView: View {
 
             Divider()
 
-            HStack(spacing: 16) {
-                Button("F5 Copy \u{2192}") { appViewModel.copyActiveSelectionToOtherPane() }
-                    .keyboardShortcut(.init("5"), modifiers: [])
-                Button("F6 Move \u{2192}") { appViewModel.moveActiveSelectionToOtherPane() }
-                    .keyboardShortcut(.init("6"), modifiers: [])
-                Button("F7 New Folder") { appViewModel.activePane.createFolder(named: "New Folder") }
-                    .keyboardShortcut(.init("7"), modifiers: [])
-                Button("F8 Delete") { appViewModel.activePane.deleteSelection() }
-                    .keyboardShortcut(.init("8"), modifiers: [])
-                Spacer()
-            }
-            .buttonStyle(.bordered)
-            .padding(8)
+            CommandBarView(appViewModel: appViewModel)
         }
+    }
+}
+
+/// Bottom command bar with Total Commander-style F-key actions. Observes the
+/// currently active pane directly so button enabled-state (e.g. "Open in
+/// IntelliJ") updates live as the selection changes.
+private struct CommandBarView: View {
+    @ObservedObject var appViewModel: AppViewModel
+    @ObservedObject var leftPane: PaneViewModel
+    @ObservedObject var rightPane: PaneViewModel
+
+    init(appViewModel: AppViewModel) {
+        self.appViewModel = appViewModel
+        self.leftPane = appViewModel.leftPane
+        self.rightPane = appViewModel.rightPane
+    }
+
+    private var activePane: PaneViewModel {
+        appViewModel.activeSide == .left ? leftPane : rightPane
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Button("F5 Copy \u{2192}") { appViewModel.copyActiveSelectionToOtherPane() }
+                .keyboardShortcut(.init("5"), modifiers: [])
+            Button("F6 Move \u{2192}") { appViewModel.moveActiveSelectionToOtherPane() }
+                .keyboardShortcut(.init("6"), modifiers: [])
+            Button("F7 New Folder") { activePane.createFolder(named: "New Folder") }
+                .keyboardShortcut(.init("7"), modifiers: [])
+            Button("F8 Delete") { activePane.deleteSelection() }
+                .keyboardShortcut(.init("8"), modifiers: [])
+            Button {
+                activePane.openSelectedFolderInIntelliJ()
+            } label: {
+                Label("Open in IntelliJ", systemImage: "hammer.fill")
+            }
+            .disabled(!activePane.canOpenInIntelliJ)
+            Spacer()
+        }
+        .buttonStyle(.bordered)
+        .padding(8)
     }
 }
 

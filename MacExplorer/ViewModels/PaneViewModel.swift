@@ -31,6 +31,19 @@ final class PaneViewModel: ObservableObject {
         items.filter { selection.contains($0.url) }
     }
 
+    /// The single selected folder, if exactly one directory is selected.
+    /// Falls back to nil when zero or multiple items (or a file) are selected.
+    var selectedFolder: FileItem? {
+        guard selectedItems.count == 1, let only = selectedItems.first, only.isDirectory else {
+            return nil
+        }
+        return only
+    }
+
+    var canOpenInIntelliJ: Bool {
+        selectedFolder != nil
+    }
+
     var totalSizeDescription: String {
         let total = items.reduce(Int64(0)) { $0 + $1.size }
         return ByteCountFormatter.fileSize.string(fromByteCount: total)
@@ -174,6 +187,16 @@ final class PaneViewModel: ObservableObject {
             try FileSystemService.shared.move(urls, to: destination)
             selection.removeAll()
             reload()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func openSelectedFolderInIntelliJ() {
+        guard let folder = selectedFolder else { return }
+        do {
+            try ExternalAppLauncher.shared.openInIntelliJ(folder.url)
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
