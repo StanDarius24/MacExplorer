@@ -17,21 +17,37 @@ struct MainWindowView: View {
                 )
                 .frame(minWidth: 360)
 
-                PaneView(
-                    viewModel: appViewModel.rightPane,
-                    isActive: appViewModel.activeSide == .right,
-                    onActivate: { appViewModel.activeSide = .right },
-                    onRequestOtherPane: { appViewModel.leftPane.currentURL }
-                )
-                .frame(minWidth: 360)
+                if let remotePane = appViewModel.remotePane {
+                    RemotePaneView(
+                        viewModel: remotePane,
+                        isActive: appViewModel.activeSide == .right,
+                        onActivate: { appViewModel.activeSide = .right },
+                        onDisconnect: { appViewModel.disconnectRemotePane() }
+                    )
+                    .frame(minWidth: 360)
+                } else {
+                    PaneView(
+                        viewModel: appViewModel.rightPane,
+                        isActive: appViewModel.activeSide == .right,
+                        onActivate: { appViewModel.activeSide = .right },
+                        onRequestOtherPane: { appViewModel.leftPane.currentURL }
+                    )
+                    .frame(minWidth: 360)
+                }
             }
 
             Divider()
 
             CommandBarView(appViewModel: appViewModel)
         }
+        .sheet(isPresented: $appViewModel.isShowingSSHSheet) {
+            SSHConnectionSheet(isPresented: $appViewModel.isShowingSSHSheet) { credentials in
+                appViewModel.beginSSHConnection(credentials: credentials)
+            }
+        }
     }
 }
+
 
 /// Bottom command bar with Total Commander-style F-key actions. Observes the
 /// currently active pane directly so button enabled-state (e.g. "Open in
@@ -67,6 +83,11 @@ private struct CommandBarView: View {
                 Label("Open in IntelliJ", systemImage: "hammer.fill")
             }
             .disabled(!activePane.canOpenInIntelliJ)
+            Button {
+                appViewModel.isShowingSSHSheet = true
+            } label: {
+                Label("Connect to SSH", systemImage: "network")
+            }
             Spacer()
         }
         .buttonStyle(.bordered)
