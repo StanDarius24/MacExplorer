@@ -1,0 +1,109 @@
+name: Release
+
+# Builds MacExplorer.app in Release configuration, ad-hoc signs it (no Apple
+# Developer account is configured for this project, so this is NOT a
+# notarized build — Gatekeeper quarantine is cleared by scripts/install.sh
+# on the installing machine), zips it, and publishes it as a GitHub Release
+# asset alongside a SHA-256 checksum.
+#
+# Trigger a release by pushing a tag, e.g.:
+#   git tag v1.0.0 && git push origin v1.0.0
+# or by running this workflow manually from the Actions tab.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp into the build (e.g. 1.0.0). Only used for manual runs."
+        required: false
+        default: "0.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve version from tag or input
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            RAW_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            RAW_VERSION="${{ github.event.inputs.version }}"
+            RAW_VERSION="${RAW_VERSION:-0.0.0}"
+          fi
+          echo "version=${RAW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${RAW_VERSION}"
+
+      - name: Resolve Swift Package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project MacExplorer.xcodeproj \
+            -scheme MacExplorer
+
+      - name: Build Release (unsigned)
+        run: |
+          xcodebuild \
+            -project MacExplorer.xcodeproj \
+            -scheme MacExplorer \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            -destination 'platform=macOS' \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+
+      - name: Locate built app
+        id: app
+        run: |
+          APP_PATH=$(find build/DerivedData/Build/Products/Release -maxdepth 1 -name "*.app" | head -n 1)
+          if [[ -z "$APP_PATH" ]]; then
+            echo "Could not find built .app bundle" >&2
+            exit 1
+          fi
+          echo "path=${APP_PATH}" >> "$GITHUB_OUTPUT"
+          echo "Found app at: ${APP_PATH}"
+
+      - name: Ad-hoc code sign
+        run: |
+          codesign --force --deep --sign - "${{ steps.app.outputs.path }}"
+          codesign --verify --verbose "${{ steps.app.outputs.path }}"
+
+      - name: Package app as zip
+        id: package
+        run: |
+          mkdir -p dist
+          ZIP_PATH="dist/MacExplorer-${{ steps.version.outputs.version }}.zip"
+          ditto -c -k --keepParent "${{ steps.app.outputs.path }}" "${ZIP_PATH}"
+          shasum -a 256 "${ZIP_PATH}" | awk '{print $1}' > "${ZIP_PATH}.sha256"
+          echo "zip_path=${ZIP_PATH}" >> "$GITHUB_OUTPUT"
+          echo "checksum_path=${ZIP_PATH}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-run{1}', steps.version.outputs.version, github.run_number) }}
+          name: MacExplorer ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ github.ref_type != 'tag' }}
+          files: |
+            ${{ steps.package.outputs.zip_path }}
+            ${{ steps.package.outputs.checksum_path }}
